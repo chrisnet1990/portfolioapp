@@ -8,7 +8,6 @@ from fpdf import FPDF
 from supabase import create_client, Client
 
 # --- 1. SUPABASE CONNECTION SETUP ---
-# Securely pulls credentials from .streamlit/secrets.toml or Cloud Secrets
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
@@ -112,13 +111,10 @@ SP_500_DATA = {
 NIFTY_MAP = {f"{k} ({v})": k for k, v in NIFTY_50_DATA.items()}
 SP_MAP = {f"{k} ({v})": k for k, v in SP_500_DATA.items()}
 
-# --- 3. DATA ENGINE (SUPABASE) ---
-@st.cache_data
+# --- 3. DATA ENGINE ---
 @st.cache_data
 def get_supabase_data(tickers, start, end):
     try:
-        # We use .order("date") without 'ascending'
-        # We add a .limit() to ensure we get enough rows for 10 years
         response = supabase.table("stock_history") \
             .select("date, ticker, price") \
             .in_("ticker", tickers) \
@@ -129,24 +125,15 @@ def get_supabase_data(tickers, start, end):
             .execute()
         
         full_df = pd.DataFrame(response.data)
-        
         if full_df.empty:
             return pd.DataFrame()
 
         full_df['date'] = pd.to_datetime(full_df['date'])
-        
-        # 10 years of data often has duplicates or messy timestamps
-        # This cleaning ensures the math works perfectly
         filtered_df = full_df.drop_duplicates(subset=['date', 'ticker'], keep='last')
         pivoted_df = filtered_df.pivot(index='date', columns='ticker', values='price')
-        
-        # Fill missing values (important for 10-year historical gaps)
-        pivoted_df = pivoted_df.ffill().bfill()
-        
-        return pivoted_df
-
+        return pivoted_df.ffill().bfill()
     except Exception as e:
-        st.error(f"❌ Supabase Connection Error: {e}")
+        st.error(f"❌ Connection Error: {e}")
         return pd.DataFrame()
 
 # --- 4. PDF ENGINE ---
@@ -167,103 +154,117 @@ def create_pdf(market, stocks, weights, final_ret, start, end):
     return pdf.output(dest='S').encode('latin-1')
 
 # --- 5. PAGE SETUP ---
-st.set_page_config(page_title="Global Portfolio Pro", layout="centered") 
+st.set_page_config(page_title="Portfolio Pro", layout="centered")
 
-# --- 6. SIDEBAR ---
-st.sidebar.header("Navigation")
-market_choice = st.sidebar.radio("Select Market", ["Nifty 50 (India)", "S&P 500 (USA)"])
+# --- 6. INPUTS (VERTICAL LAYOUT) ---
+st.title("📂 Portfolio Pro")
+st.markdown("---")
 
-current_map = NIFTY_MAP if "Nifty" in market_choice else SP_MAP 
-market_name = "Nifty 50" if "Nifty" in market_choice else "S&P 500" 
-benchmark_ticker = "^NSEI" if "Nifty" in market_choice else "^GSPC" 
+market_choice = st.selectbox("Select Market", ["Nifty 50 (India)", "S&P 500 (USA)"])
 
-selected_labels = st.sidebar.multiselect(
-    f"Select 5-10 Stocks ({market_name})", 
+# Define variables based on selection BEFORE they are used
+if "Nifty" in market_choice:
+    current_map = NIFTY_MAP
+    market_name = "Nifty 50"
+    benchmark_ticker = "^NSEI"
+else:
+    current_map = SP_MAP
+    market_name = "S&P 500"
+    benchmark_ticker = "^GSPC"
+
+# Now current_map is defined and safe to use
+selected_labels = st.multiselect(
+    "Select 5-10 Stocks", 
     options=list(current_map.keys()),
     placeholder="Search tickers..."
 )
+selected_tickers = [current_map[label] for label in selected_labels]
 
-selected_tickers = [current_map[label] for label in selected_labels] 
-start_date = st.sidebar.date_input("Start Date", datetime.today() - timedelta(days=365))
-end_date = st.sidebar.date_input("End Date", datetime.today())
+col_date1, col_date2 = st.columns(2)
+with col_date1:
+    start_date = st.date_input("Start Date", datetime.today() - timedelta(days=365))
+with col_date2:
+    end_date = st.date_input("End Date", datetime.today())
 
-# --- 7. MAIN DASHBOARD ---
-st.title("📂 Global Portfolio Pro") 
+st.markdown("---")
 
+# --- 7. ANALYSIS & DISPLAY ---
 if 5 <= len(selected_tickers) <= 10:
-    with st.spinner('📡 Fetching data from Supabase Cloud...'):
+    with st.spinner('⏳ Calculating Optimization...'):
         all_required = selected_tickers + [benchmark_ticker]
         data_combined = get_supabase_data(all_required, start_date, end_date)
 
         if not data_combined.empty and benchmark_ticker in data_combined.columns:
-            # --- FAIL-SAFE CHECK FOR MISSING TICKERS ---
             available_tickers = [t for t in selected_tickers if t in data_combined.columns]
-            missing_tickers = list(set(selected_tickers) - set(available_tickers))
-
-            if missing_tickers:
-                st.warning(f"⚠️ Missing data for: {', '.join(missing_tickers)}. Please run your sync script.")
-
+            
             if len(available_tickers) >= 2:
+                # Math Logic
                 data = data_combined[available_tickers].dropna()
                 bench_data = data_combined[benchmark_ticker].dropna()
+                
+                returns_pct = data.pct_change().dropna()
+                log_ret = np.log(data/data.shift(1)).dropna()
+                
+                num_portfolios = 2000
+                all_weights = np.zeros((num_portfolios, len(available_tickers)))
+                sharpe_arr = np.zeros(num_portfolios)
 
-                if not data.empty and not bench_data.empty:
-                    # Returns calculation
-                    returns_pct = data.pct_change().dropna()
-                    log_ret = np.log(data/data.shift(1)).dropna()
-                    
-                    # Portfolio Optimization
-                    num_portfolios = 2000
-                    all_weights = np.zeros((num_portfolios, len(available_tickers)))
-                    sharpe_arr = np.zeros(num_portfolios)
+                for i in range(num_portfolios):
+                    w = np.random.random(len(available_tickers))
+                    w /= np.sum(w)
+                    all_weights[i,:] = w
+                    ret = np.sum((log_ret.mean() * w) * 252)
+                    vol = np.sqrt(np.dot(w.T, np.dot(log_ret.cov() * 252, w)))
+                    sharpe_arr[i] = ret / vol
 
-                    for i in range(num_portfolios):
-                        w = np.random.random(len(available_tickers))
-                        w /= np.sum(w)
-                        all_weights[i,:] = w
-                        ret = np.sum((log_ret.mean() * w) * 252)
-                        vol = np.sqrt(np.dot(w.T, np.dot(log_ret.cov() * 252, w)))
-                        sharpe_arr[i] = ret / vol
+                best_idx = sharpe_arr.argmax() 
+                opt_weights = all_weights[best_idx,:] 
+                
+                opt_cum = (1 + returns_pct.dot(opt_weights)).cumprod()
+                bench_cum = (1 + bench_data.pct_change().dropna()).cumprod()
+                
+                final_ret = float((opt_cum.iloc[-1] - 1) * 100) 
+                bench_ret = float((bench_cum.iloc[-1] - 1) * 100) 
+                alpha = final_ret - bench_ret 
 
-                    best_idx = sharpe_arr.argmax() 
-                    opt_weights = all_weights[best_idx,:] 
-                    
-                    # Performance comparison
-                    opt_cum = (1 + returns_pct.dot(opt_weights)).cumprod()
-                    bench_cum = (1 + bench_data.pct_change().dropna()).cumprod()
-                    
-                    final_ret = float((opt_cum.iloc[-1] - 1) * 100) 
-                    bench_ret = float((bench_cum.iloc[-1] - 1) * 100) 
-                    alpha = final_ret - bench_ret 
-                    
-                    st.markdown(f"### 📈 {market_name} Analysis Summary") 
-                    m1, m2, m3 = st.columns(3) 
-                    m1.metric("Your Portfolio", f"{final_ret:.1f}%") 
-                    m2.metric(f"{market_name} Index", f"{bench_ret:.1f}%") 
-                    m3.metric("Alpha (Edge)", f"{alpha:.1f}%", delta=f"{alpha:.1f}%") 
+                # --- MOBILE-FIRST VERTICAL DISPLAY ---
+                st.subheader("📊 Performance Summary")
+                m1, m2 = st.columns(2)
+                m1.metric("Portfolio", f"{final_ret:.1f}%")
+                m2.metric(f"{market_name}", f"{bench_ret:.1f}%")
+                st.metric("Alpha (Your Edge)", f"{alpha:.1f}%", delta=f"{alpha:.1f}%")
 
-                    tab1, tab2 = st.tabs(["📉 Cumulative Returns", "🍕 Portfolio Weighting"]) 
-                    
-                    with tab1:
-                        fig_line = go.Figure() 
-                        fig_line.add_trace(go.Scatter(x=opt_cum.index, y=opt_cum, name="Optimized Portfolio", line=dict(color='#2ecc71', width=4))) 
-                        fig_line.add_trace(go.Scatter(x=bench_cum.index, y=bench_cum, name=f"{market_name} Index", line=dict(color='#3498db', width=2, dash='dot')))
-                        fig_line.update_layout(height=450, template="plotly_white") 
-                        st.plotly_chart(fig_line, use_container_width=True) 
+                st.markdown("---")
 
-                    with tab2:
-                        # Map current labels to opt_weights
-                        available_labels = [l for l in selected_labels if current_map[l] in available_tickers]
-                        fig_pie = px.pie(values=opt_weights, names=available_labels, hole=0.5) 
-                        st.plotly_chart(fig_pie, use_container_width=True) 
+                # Line Chart first
+                st.subheader("📉 Market Comparison")
+                fig_line = go.Figure()
+                fig_line.add_trace(go.Scatter(x=opt_cum.index, y=opt_cum, name="Portfolio", line=dict(color='#2ecc71', width=3)))
+                fig_line.add_trace(go.Scatter(x=bench_cum.index, y=bench_cum, name=market_name, line=dict(color='#3498db', width=2, dash='dot')))
+                fig_line.update_layout(
+                    height=400, 
+                    margin=dict(l=0, r=0, t=20, b=0), 
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    template="plotly_white"
+                )
+                st.plotly_chart(fig_line, use_container_width=True, config={'displayModeBar': False})
 
-                    # PDF Export
-                    pdf_bytes = create_pdf(market_name, available_labels, opt_weights, final_ret, start_date, end_date)
-                    st.sidebar.download_button("📩 Download PDF Report", data=pdf_bytes, file_name="Portfolio_Analysis.pdf", use_container_width=True) 
+                st.markdown("---")
+
+                # Pie Chart second
+                st.subheader("🍕 Optimal Allocation")
+                available_labels_final = [l for l in selected_labels if current_map[l] in available_tickers]
+                fig_pie = px.pie(values=opt_weights, names=available_labels_final, hole=0.4)
+                fig_pie.update_layout(height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h"))
+                st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
+
+                st.markdown("---")
+
+                # PDF Export at the bottom
+                pdf_bytes = create_pdf(market_name, available_labels_final, opt_weights, final_ret, start_date, end_date)
+                st.download_button("📩 Download PDF Report", data=pdf_bytes, file_name="Portfolio_Report.pdf", use_container_width=True)
+
             else:
-                st.error("Not enough ticker data found in Supabase to run analysis.")
-        else:
-            st.error("⚠️ Ticker data not found in Supabase. Please ensure your sync script is running successfully.")
-
+                st.error("Not enough historical data found for these stocks.")
 else:
-    st.info(f"💡 Select between 5 and 10 stocks in the sidebar to begin optimization.")
+    st.info("💡 Select 5 to 10 stocks above to begin the calculation.")
