@@ -259,6 +259,16 @@ if 5 <= len(selected_tickers) <= 10:
                 st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
 
                 st.markdown("---")
+                st.caption("""
+                **Disclaimer & Disclosure** This application is strictly for **educational and research purposes**. It is not a commercial financial 
+                product and does not constitute professional investment advice. 
+
+                Please be aware:
+                * **Prone to Errors:** The data is pulled from automated sources and may contain inaccuracies or delays.
+                * **No Guarantees:** Historical performance (backtesting) does not guarantee future results. 
+                * **User Responsibility:** Users should consult with a certified financial advisor before making 
+                any investment decisions. The developers of this tool are not responsible for any financial losses.
+                """)
 
                 # PDF Export at the bottom
                 pdf_bytes = create_pdf(market_name, available_labels_final, opt_weights, final_ret, start_date, end_date)
