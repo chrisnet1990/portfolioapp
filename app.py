@@ -7,6 +7,16 @@ from datetime import datetime, timedelta
 from fpdf import FPDF
 from supabase import create_client, Client
 
+# Hide the "Built with Streamlit" footer and main menu hamburger
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
 # --- 1. SUPABASE CONNECTION SETUP ---
 try:
     URL = st.secrets["SUPABASE_URL"]
