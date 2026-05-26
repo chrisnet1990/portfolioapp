@@ -7,7 +7,15 @@ from datetime import datetime, timedelta
 from fpdf import FPDF
 from supabase import create_client, Client
 
-
+# Hide the "Built with Streamlit" footer and main menu hamburger
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # --- 1. SUPABASE CONNECTION SETUP ---
 try:
@@ -15,7 +23,8 @@ try:
     KEY = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(URL, KEY)
 except Exception as e:
-    st.error("Missing Supabase Secrets! Please ensure SUPABASE_URL and SUPABASE_KEY are in your secrets.")
+    st.error("❌ App Initialization Error: Database connection could not be established.")
+    st.stop()  # Safe execution halt prevents downstream NameErrors or stack exposures
 
 # --- 2. FULL COMPANY DATABASE ---
 NIFTY_50_DATA = {
@@ -39,75 +48,84 @@ NIFTY_50_DATA = {
 }
 
 SP_500_DATA = {
-    "AAPL": "Apple Inc.", "MSFT": "Microsoft", "NVDA": "Nvidia", "AMZN": "Amazon", "META": "Meta Platforms",
-    "GOOGL": "Alphabet (A)", "GOOG": "Alphabet (C)", "BRK-B": "Berkshire Hathaway", "LLY": "Eli Lilly",
-    "AVGO": "Broadcom", "JPM": "JPMorgan Chase", "TSLA": "Tesla", "WMT": "Walmart", "XOM": "Exxon Mobil",
-    "UNH": "UnitedHealth", "MA": "Mastercard", "PG": "Procter & Gamble", "V": "Visa", "ORCL": "Oracle",
-    "COST": "Costco", "HD": "Home Depot", "ABBV": "AbbVie", "JNJ": "Johnson & Johnson", "MRK": "Merck",
-    "AMD": "AMD", "NFLX": "Netflix", "CRM": "Salesforce", "BAC": "Bank of America", "ADBE": "Adobe",
-    "KO": "Coca-Cola", "PEP": "PepsiCo", "LIN": "Linde", "TMO": "Thermo Fisher", "WFC": "Wells Fargo",
-    "CSCO": "Cisco", "ACN": "Accenture", "DIS": "Disney", "PM": "Philip Morris", "ABT": "Abbott Labs",
-    "INTU": "Intuit", "DHR": "Danaher", "CAT": "Caterpillar", "GE": "General Electric", "VZ": "Verizon",
-    "AMAT": "Applied Materials", "INTC": "Intel", "IBM": "IBM", "UBER": "Uber", "PFE": "Pfizer",
-    "AMGN": "Amgen", "NOW": "ServiceNow", "TXN": "Texas Instruments", "NEE": "NextEra Energy", "GS": "Goldman Sachs",
-    "ISRG": "Intuitive Surgical", "LOW": "Lowe's", "CMCSA": "Comcast", "AXP": "American Express", "MS": "Morgan Stanley",
-    "SPGI": "S&P Global", "HON": "Honeywell", "ELV": "Elevance Health", "RTX": "Raytheon", "COP": "ConocoPhillips",
-    "BKNG": "Booking Holdings", "PLD": "Prologis", "SYK": "Stryker", "TJX": "TJX Companies", "VRTX": "Vertex Pharma",
-    "ETN": "Eaton", "C": "Citigroup", "REGN": "Regeneron", "LRCX": "Lam Research", "BLK": "BlackRock",
-    "ADI": "Analog Devices", "MDLZ": "Mondelez", "BA": "Boeing", "CB": "Chubb", "BSX": "Boston Scientific",
-    "DE": "Deere & Co", "CI": "Cigna", "MU": "Micron", "T": "AT&T", "MMC": "Marsh McLennan",
-    "AMT": "American Tower", "LMT": "Lockheed Martin", "PANW": "Palo Alto Networks", "UNP": "Union Pacific",
-    "GILD": "Gilead Sciences", "ADP": "ADP", "SCHW": "Charles Schwab", "FI": "Fiserv", "PGR": "Progressive",
-    "MDT": "Medtronic", "CDNS": "Cadence Design", "VLO": "Valero", "CVS": "CVS Health", "MAR": "Marriott",
-    "HCA": "HCA Healthcare", "ORLY": "O'Reilly", "SNPS": "Synopsys", "EOG": "EOG Resources", "AIG": "AIG",
-    "ZTS": "Zoetis", "KLAC": "KLA Corp", "SLB": "Schlumberger", "MCO": "Moody's", "FDX": "FedEx",
-    "APH": "Amphenol", "ECL": "Ecolab", "WM": "Waste Management", "ADSK": "Autodesk", "GD": "General Dynamics",
-    "ITW": "Illinois Tool Works", "USB": "US Bancorp", "ICE": "Intercontinental Exchange", "CMG": "Chipotle",
-    "PH": "Parker-Hannifin", "MCK": "McKessey", "F": "Ford", "GM": "GM", "DASH": "DoorDash", "EMR": "Emerson Electric",
-    "NSC": "Norfolk Southern", "PCAR": "PACCAR", "ROST": "Ross Stores", "WELL": "Welltower", "MSI": "Motorola",
-    "PSX": "Phillips 66", "MPC": "Marathon Petroleum", "CPRT": "Copart", "DXCM": "Dexcom", "AJG": "Arthur J. Gallagher",
-    "HLT": "Hilton", "CSX": "CSX Corp", "IT": "Gartner", "CARR": "Carrier", "CTAS": "Cintas", "AON": "Aon",
-    "TGT": "Target", "NOC": "Northrop Grumman", "ANET": "Arista Networks", "D": "Dominion Energy", "TT": "Trane",
-    "ROP": "Roper", "TDG": "TransDigm", "EW": "Edwards Lifesciences", "CUM": "Cummins", "MET": "MetLife",
-    "WMB": "Williams Cos", "ADM": "Archer-Daniels-Midland", "DELL": "Dell", "O": "Realty Income", "BKR": "Baker Hughes",
-    "KMB": "Kimberly-Clark", "OKE": "ONEOK", "DLR": "Digital Realty", "COR": "Cencora", "A": "Agilent",
-    "GWW": "Grainger", "PAYX": "Paychex", "TEL": "TE Connectivity", "JCI": "Johnson Controls", "IDXX": "IDEXX Labs",
-    "MSCI": "MSCI", "IQV": "IQVIA", "LULU": "Lululemon", "KVUE": "Kenvue", "TRV": "Travelers", "STX": "Seagate",
-    "FTNT": "Fortinet", "KDP": "Keurig Dr Pepper", "MCHP": "Microchip", "PRU": "Prudential", "CTSH": "Cognizant",
-    "AEP": "American Electric Power", "GEV": "GE Vernova", "SYY": "Sysco", "CNC": "Centene", "KR": "Kroger",
-    "OTIS": "Otis Worldwide", "FICO": "Fair Isaac", "FIS": "Fidelity National", "HWM": "Howmet", "EXC": "Exelon",
-    "EFX": "Equifax", "BBY": "Best Buy", "AZO": "AutoZone", "XEL": "Xcel Energy", "ED": "Consolidated Edison",
-    "FAST": "Fastenal", "DFS": "Discover", "STT": "State Street", "CDW": "CDW Corp", "LHX": "L3Harris",
-    "KEYS": "Keysight", "MTB": "M&T Bank", "GLW": "Corning", "WBD": "Warner Bros. Discovery", "WES": "Western Midstream",
-    "VICI": "VICI Properties", "GPN": "Global Payments", "WY": "Weyerhaeuser", "DLTR": "Dollar Tree",
-    "HPQ": "HP Inc.", "CHD": "Church & Dwight", "WTW": "WTW", "CBRE": "CBRE Group", "ULTA": "Ulta Beauty",
-    "VMC": "Vulcan Materials", "ODFL": "Old Dominion", "DAL": "Delta Air Lines", "EBAY": "eBay",
-    "TROW": "T. Rowe Price", "AWK": "American Water", "LYB": "LyondellBasell", "ARE": "Alexandria RE",
-    "IR": "Ingersoll Rand", "TSN": "Tyson Foods", "GEN": "Gen Digital", "ZBH": "Zimmer Biomet",
-    "ALGN": "Align Technology", "FITB": "Fifth Third", "BRO": "Brown & Brown", "MGM": "MGM Resorts",
-    "LUV": "Southwest Airlines", "HBAN": "Huntington", "ESS": "Essex Property", "MAA": "Mid-America Apartment",
-    "RVTY": "Revvity", "SWK": "Stanley Black & Decker", "EXPE": "Expedia", "STLD": "Steel Dynamics",
-    "TER": "Teradyne", "WDC": "Western Digital", "RF": "Regions Financial", "INVH": "Invitation Homes",
-    "VTR": "Ventas", "PKG": "Packaging Corp", "CNP": "CenterPoint", "CLX": "Clorox", "DG": "Dollar General",
-    "POOL": "Pool Corp", "DPZ": "Domino's", "DRI": "Darden Restaurants", "MKC": "McCormick", "STE": "STERIS",
-    "WAT": "Waters Corp", "KEY": "KeyCorp", "CAH": "Cardinal Health", "EG": "Everest Group", "HES": "Hess Corp",
-    "DVN": "Devon Energy", "DOV": "Dover Corp", "MTCH": "Match Group", "MRO": "Marathon Oil", "JBHT": "JB Hunt",
-    "BALL": "Ball Corp", "AMCR": "Amcor", "TYL": "Tyler Tech", "EPAM": "EPAM Systems", "FSLR": "First Solar",
-    "FMC": "FMC Corp", "PARA": "Paramount", "QRVO": "Qorvo", "ENPH": "Enphase Energy", "HAS": "Hasbro",
-    "CHTR": "Charter Comm", "BBWI": "Bath & Body Works", "MHK": "Mohawk Industries", "GNRC": "Generac",
-    "AIZ": "Assurant", "L": "Loews Corp", "IVZ": "Invesco", "KMX": "CarMax", "MOS": "Mosaic", "APA": "APA Corp",
-    "AES": "AES Corp", "CPB": "Campbell Soup", "HRL": "Hormel", "BEN": "Franklin Resources", "TPR": "Tapestry",
-    "NWS": "News Corp (B)", "NWSA": "News Corp (A)", "VNO": "Vornado", "WBA": "Walgreens", "CZR": "Caesars",
-    "RL": "Ralph Lauren", "PPL": "PPL Corp", "PAYC": "Paycom", "JKHY": "Jack Henry", "JNPR": "Juniper Networks",
-    "SJM": "JM Smucker", "ALB": "Albemarle", "PNW": "Pinnacle West", "FRT": "Federal Realty", "XRAY": "Dentsply Sirona",
-    "EMN": "Eastman Chemical", "IP": "International Paper", "SWKS": "Skyworks", "WHR": "Whirlpool",
-    "TECH": "Bio-Techne", "BIO": "Bio-Rad", "UHS": "Universal Health", "HSIC": "Henry Schein", "CRL": "Charles River",
-    "DXC": "DXC Tech", "TFX": "Teleflex", "MTD": "Mettler Toledo", "Zebra": "Zebra Tech", "HII": "Huntington Ingalls",
-    "LNT": "Alliant Energy", "NI": "NiSource", "ATO": "Atmos Energy", "NRG": "NRG Energy", "VST": "Vistra Corp",
-    "SRE": "Sempra", "WEC": "WEC Energy", "ES": "Eversource", "DTE": "DTE Energy", "ETR": "Entergy",
-    "FE": "FirstEnergy", "AEE": "Ameren", "CMS": "CMS Energy", "EVRG": "Evergy", "AVB": "AvalonBay",
-    "EQR": "Equity Residential", "PSA": "Public Storage", "BXP": "Boston Properties", "KIM": "Kimco Realty",
-    "REG": "Regency Centers", "UDR": "UDR Inc.", "HST": "Host Hotels"
+    "A": "Agilent", "AAPL": "Apple Inc.", "ABBV": "AbbVie", "ABT": "Abbott Labs", "ACN": "Accenture",
+    "ADBE": "Adobe", "ADI": "Analog Devices", "ADM": "Archer-Daniels-Midland", "ADP": "ADP",
+    "ADSK": "Autodesk", "AEE": "Ameren", "AEP": "American Electric Power", "AES": "AES Corp",
+    "AIG": "AIG", "AIZ": "Assurant", "AJG": "Arthur J. Gallagher", "ALB": "Albemarle",
+    "ALGN": "Align Technology", "AMAT": "Applied Materials", "AMD": "AMD", "AMCR": "Amcor",
+    "AMGN": "Amgen", "AMT": "American Tower", "AMZN": "Amazon", "ANET": "Arista Networks",
+    "AON": "Aon", "APA": "APA Corp", "APH": "Amphenol", "APOLLOHOSP.NS": "Apollo Hospitals",
+    "ARE": "Alexandria RE", "ATO": "Atmos Energy", "AVB": "AvalonBay", "AVGO": "Broadcom",
+    "AWK": "American Water", "AXP": "American Express", "AZO": "AutoZone", "BA": "Boeing",
+    "BAC": "Bank of America", "BALL": "Ball Corp", "BBWI": "Bath & Body Works", "BBY": "Best Buy",
+    "BEN": "Franklin Resources", "BIO": "Bio-Rad", "BKR": "Baker Hughes", "BLK": "BlackRock",
+    "BRK-B": "Berkshire Hathaway", "BRO": "Brown & Brown", "BSX": "Boston Scientific",
+    "BXP": "Boston Properties", "C": "Citigroup", "CAH": "Cardinal Health", "CARR": "Carrier",
+    "CAT": "Caterpillar", "CB": "Chubb", "CBRE": "CBRE Group", "CDNS": "Cadence Design",
+    "CDW": "CDW Corp", "CHD": "Church & Dwight", "CHTR": "Charter Comm", "CI": "Cigna",
+    "CIM": "Kimco Realty", "CIPLA.NS": "Cipla", "CLX": "Clorox", "CMCSA": "Comcast",
+    "CMG": "Chipotle", "CMS": "CMS Energy", "CNC": "Centene", "CNP": "CenterPoint",
+    "COALINDIA.NS": "Coal India", "COP": "ConocoPhillips", "COR": "Cencora", "COST": "Costco",
+    "CPB": "Campbell Soup", "CPRT": "Copart", "CRL": "Charles River", "CRM": "Salesforce",
+    "CSCO": "Cisco", "CSX": "CSX Corp", "CTAS": "Cintas", "CTSH": "Cognizant", "CUM": "Cummins",
+    "CVS": "CVS Health", "CZR": "Caesars", "D": "Dominion Energy", "DAL": "Delta Air Lines",
+    "DASH": "DoorDash", "DE": "Deere & Co", "DELL": "Dell", "DFS": "Discover", "DG": "Dollar General",
+    "DHR": "Danaher", "DIS": "Disney", "DLR": "Digital Realty", "DLTR": "Dollar Tree",
+    "DOV": "Dover Corp", "DPZ": "Domino's", "DRI": "Darden Restaurants", "DTE": "DTE Energy",
+    "DVN": "Devon Energy", "DXC": "DXC Tech", "DXCM": "Dexcom", "EBAY": "eBay", "ECL": "Ecolab",
+    "ED": "Consolidated Edison", "EFX": "Equifax", "EG": "Everest Group", "EMN": "Eastman Chemical",
+    "EMR": "Emerson Electric", "ENPH": "Enphase Energy", "EOG": "EOG Resources", "EPAM": "EPAM Systems",
+    "EQR": "Equity Residential", "ES": "Eversource", "ESS": "Essex Property", "ETN": "Eaton",
+    "ETR": "Entergy", "EVRG": "Evergy", "EW": "Edwards Lifesciences", "EXC": "Exelon",
+    "EXPE": "Expedia", "F": "Ford", "FAST": "Fastenal", "FDX": "FedEx", "FE": "FirstEnergy",
+    "FICO": "Fair Isaac", "FI": "Fiserv", "FIS": "Fidelity National", "FITB": "Fifth Third",
+    "FMC": "FMC Corp", "FRT": "Federal Realty", "FSLR": "First Solar", "FTNT": "Fortinet",
+    "GD": "General Dynamics", "GE": "General Electric", "GEN": "Gen Digital", "GEV": "GE Vernova",
+    "GILD": "Gilead Sciences", "GLW": "Corning", "GM": "GM", "GNRC": "Generac", "GOOG": "Alphabet (C)",
+    "GOOGL": "Alphabet (A)", "GPN": "Global Payments", "GS": "Goldman Sachs", "GWW": "Grainger",
+    "HAS": "Hasbro", "HCA": "HCA Healthcare", "HD": "Home Depot", "HES": "Hess Corp",
+    "HII": "Huntington Ingalls", "HLT": "Hilton", "HON": "Honeywell", "HRL": "Hormel",
+    "HSIC": "Henry Schein", "HST": "Host Hotels", "HWM": "Howmet", "IBM": "IBM",
+    "ICE": "Intercontinental Exchange", "IDXX": "IDEXX Labs", "ILV": "Elevance Health",
+    "INTC": "Intel", "INTU": "Intuit", "INVH": "Invitation Homes", "IP": "International Paper",
+    "IQV": "IQVIA", "IR": "Ingersoll Rand", "ISRG": "Intuitive Surgical", "IT": "Gartner",
+    "ITW": "Illinois Tool Works", "IVZ": "Invesco", "JBHT": "JB Hunt", "JCI": "Johnson Controls",
+    "JKHY": "Jack Henry", "JNJ": "Johnson & Johnson", "JNPR": "Juniper Networks", "JPM": "JPMorgan Chase",
+    "KDP": "Keurig Dr Pepper", "KEY": "KeyCorp", "KEYS": "Keysight", "KIM": "Kimco Realty",
+    "KLAC": "KLA Corp", "KMB": "Kimberly-Clark", "KMX": "CarMax", "KO": "Coca-Cola", "KR": "Kroger",
+    "KVUE": "Kenvue", "L": "Loews Corp", "LHX": "L3Harris", "LIN": "Linde", "LLY": "Eli Lilly",
+    "LMT": "Lockheed Martin", "LNT": "Alliant Energy", "LOW": "Lowe's", "LRCX": "Lam Research",
+    "LULU": "Lululemon", "LUV": "Southwest Airlines", "LYB": "LyondellBasell", "MA": "Mastercard",
+    "MAA": "Mid-America Apartment", "MAR": "Marriott", "MCHP": "Microchip", "MCK": "McKessey",
+    "MCO": "Moody's", "MDT": "Medtronic", "MDLZ": "Mondelez", "MET": "MetLife", "META": "Meta Platforms",
+    "MGM": "MGM Resorts", "MHK": "Mohawk Industries", "MKC": "McCormick", "MMC": "Marsh McLennan",
+    "MOS": "Mosaic", "MPC": "Marathon Petroleum", "MRO": "Marathon Oil", "MS": "Morgan Stanley",
+    "MSCI": "MSCI", "MSFT": "Microsoft", "MSI": "Motorola", "MTB": "M&T Bank", "MTCH": "Match Group",
+    "MTD": "Mettler Toledo", "MU": "Micron", "NEE": "NextEra Energy", "NFLX": "Netflix", "NI": "NiSource",
+    "NOC": "Northrop Grumman", "NOW": "ServiceNow", "NRG": "NRG Energy", "NSC": "Norfolk Southern",
+    "NWS": "News Corp (B)", "NWSA": "News Corp (A)", "NVDA": "Nvidia", "O": "Realty Income",
+    "ODFL": "Old Dominion", "OKE": "ONEOK", "ORCL": "Oracle", "ORLY": "O'Reilly", "OTIS": "Otis Worldwide",
+    "PANW": "Palo Alto Networks", "PARA": "Paramount", "PAYC": "Paycom", "PAYX": "Paychex",
+    "PCAR": "PACCAR", "PEP": "PepsiCo", "PFE": "Pfizer", "PG": "Procter & Gamble", "PGR": "Progressive",
+    "PH": "Parker-Hannifin", "PKG": "Packaging Corp", "PLD": "Prologis", "PM": "Philip Morris",
+    "PNW": "Pinnacle West", "POOL": "Pool Corp", "PPL": "PPL Corp", "PRU": "Prudential",
+    "PSA": "Public Storage", "PSX": "Phillips 66", "QRVO": "Qorvo", "REG": "Regency Centers",
+    "REGN": "Regeneron", "RF": "Regions Financial", "RL": "Ralph Lauren", "ROP": "Roper",
+    "ROST": "Ross Stores", "RTX": "Raytheon", "RVTY": "Revvity", "SJM": "JM Smucker",
+    "SLB": "Schlumberger", "SNPS": "Synopsys", "SPGI": "S&P Global", "SRE": "Sempra", "STE": "STERIS",
+    "STLD": "Steel Dynamics", "STT": "State Street", "STX": "Seagate", "SWK": "Stanley Black & Decker",
+    "SWKS": "Skyworks", "SYK": "Stryker", "SYY": "Sysco", "T": "AT&T", "TDG": "TransDigm",
+    "TECH": "Bio-Techne", "TEL": "TE Connectivity", "TER": "Teradyne", "TFX": "Teleflex",
+    "TGT": "Target", "TMO": "Thermo Fisher", "TPR": "Tapestry", "TROW": "T. Rowe Price",
+    "TRV": "Travelers", "TSLA": "Tesla", "TSN": "Tyson Foods", "TT": "Trane", "TXN": "Texas Instruments",
+    "TYL": "Tyler Tech", "UBER": "Uber", "UDR": "UDR Inc.", "UHS": "Universal Health", "ULTA": "Ulta Beauty",
+    "UNH": "UnitedHealth", "UNP": "Union Pacific", "USB": "US Bancorp", "V": "Visa", "VICI": "VICI Properties",
+    "VLO": "Valero", "VMC": "Vulcan Materials", "VNO": "Vornado", "VRTX": "Vertex Pharma",
+    "VST": "Vistra Corp", "VTR": "Ventas", "WBA": "Walgreens", "WBD": "Warner Bros. Discovery",
+    "WDC": "Western Digital", "WEC": "WEC Energy", "WELL": "Welltower", "WFC": "Wells Fargo",
+    "WES": "Western Midstream", "WHR": "Whirlpool", "WM": "Waste Management", "WMB": "Williams Cos",
+    "WMT": "Walmart", "WY": "Weyerhaeuser", "XEL": "Xcel Energy", "XOM": "Exxon Mobil",
+    "XRAY": "Dentsply Sirona", "ZBH": "Zimmer Biomet", "Zebra": "Zebra Tech", "ZTS": "Zoetis"
 }
 
 NIFTY_MAP = {f"{k} ({v})": k for k, v in NIFTY_50_DATA.items()}
@@ -164,7 +182,6 @@ st.markdown("---")
 
 market_choice = st.selectbox("Select Market", ["Nifty 50 (India)", "S&P 500 (USA)"])
 
-# Define variables based on selection BEFORE they are used
 if "Nifty" in market_choice:
     current_map = NIFTY_MAP
     market_name = "Nifty 50"
@@ -174,7 +191,6 @@ else:
     market_name = "S&P 500"
     benchmark_ticker = "^GSPC"
 
-# Now current_map is defined and safe to use
 selected_labels = st.multiselect(
     "Select 5-10 Stocks", 
     options=list(current_map.keys()),
@@ -190,93 +206,152 @@ with col_date2:
 
 st.markdown("---")
 
-# --- 7. ANALYSIS & DISPLAY ---
+# --- 7. ANALYSIS & DISPLAY CONTROL ---
 if 5 <= len(selected_tickers) <= 10:
-    with st.spinner('⏳ Calculating Optimization...'):
-        all_required = selected_tickers + [benchmark_ticker]
-        data_combined = get_supabase_data(all_required, start_date, end_date)
+    
+    all_required = selected_tickers + [benchmark_ticker]
+    data_combined = get_supabase_data(all_required, start_date, end_date)
 
-        if not data_combined.empty and benchmark_ticker in data_combined.columns:
-            available_tickers = [t for t in selected_tickers if t in data_combined.columns]
+    if not data_combined.empty and benchmark_ticker in data_combined.columns:
+        available_tickers = [t for t in selected_tickers if t in data_combined.columns]
+        
+        if len(available_tickers) >= 2:
+            data = data_combined[available_tickers].dropna()
+            bench_data = data_combined[benchmark_ticker].dropna()
             
-            if len(available_tickers) >= 2:
-                # Math Logic
-                data = data_combined[available_tickers].dropna()
-                bench_data = data_combined[benchmark_ticker].dropna()
-                
-                returns_pct = data.pct_change().dropna()
-                log_ret = np.log(data/data.shift(1)).dropna()
-                
-                num_portfolios = 2000
-                all_weights = np.zeros((num_portfolios, len(available_tickers)))
-                sharpe_arr = np.zeros(num_portfolios)
+            returns_pct = data.pct_change().dropna()
+            log_ret = np.log(data/data.shift(1)).dropna()
+            
+            # --- PRE-RUN ASSET METRICS GRID ---
+            st.subheader("🧮 Asset Risk & Return Metrics")
+            
+            # Calculate Independent Total Returns ((Last Price / First Price) - 1) * 100
+            independent_returns = {}
+            for ticker in available_tickers:
+                first_price = data[ticker].iloc[0]
+                last_price = data[ticker].iloc[-1]
+                independent_returns[ticker] = ((last_price / first_price) - 1) * 100
 
-                for i in range(num_portfolios):
-                    w = np.random.random(len(available_tickers))
-                    w /= np.sum(w)
-                    all_weights[i,:] = w
-                    ret = np.sum((log_ret.mean() * w) * 252)
-                    vol = np.sqrt(np.dot(w.T, np.dot(log_ret.cov() * 252, w)))
-                    sharpe_arr[i] = ret / vol
+            # Calculate Annualized Variance
+            variance_series = log_ret.var() * 252
+            
+            # Render independent data parameters cleanly into summary columns
+            st.markdown("**Independent Asset Breakdown (Over Date Range):**")
+            for ticker in available_tickers:
+                clean_name = ticker.replace(".NS", "")
+                c1, c2 = st.columns([1, 3])
+                with c1:
+                    st.markdown(f"**{clean_name}**")
+                with c2:
+                    st.markdown(f"Return: `{independent_returns[ticker]:+.2f}%` | Variance: `{variance_series[ticker]:.4f}`")
+            
+            st.markdown(" ")
+            
+            # Calculate and display Correlation Matrix
+            st.markdown("**Asset Correlation Matrix Heatmap:**")
+            corr_matrix = returns_pct.corr()
+            
+            fig_corr = px.imshow(
+                corr_matrix,
+                text_auto=".2f",
+                aspect="auto",
+                color_continuous_scale="RdBu_r",
+                range_color=[-1, 1],
+                labels=dict(color="Correlation")
+            )
+            fig_corr.update_layout(
+                height=400,
+                margin=dict(l=20, r=20, t=20, b=20),
+                xaxis_title="Tickers",
+                yaxis_title="Tickers"
+            )
+            st.plotly_chart(fig_corr, width='stretch', config={'displayModeBar': False})
+            
+            st.markdown("---")
+            
+            # --- THE SIMULATION ACTION BUTTON ---
+            st.subheader("🚀 Run Allocation Engine")
+            st.markdown("Click below to pass these parameters through the Monte Carlo optimization framework.")
+            
+            if st.button("Run Portfolio Simulation", type="primary", width='stretch'):
+                with st.spinner('⏳ Running 2,000 Monte Carlo Paths...'):
+                    num_portfolios = 2000
+                    all_weights = np.zeros((num_portfolios, len(available_tickers)))
+                    sharpe_arr = np.zeros(num_portfolios)
 
-                best_idx = sharpe_arr.argmax() 
-                opt_weights = all_weights[best_idx,:] 
-                
-                opt_cum = (1 + returns_pct.dot(opt_weights)).cumprod()
-                bench_cum = (1 + bench_data.pct_change().dropna()).cumprod()
-                
-                final_ret = float((opt_cum.iloc[-1] - 1) * 100) 
-                bench_ret = float((bench_cum.iloc[-1] - 1) * 100) 
-                alpha = final_ret - bench_ret 
+                    for i in range(num_portfolios):
+                        w = np.random.random(len(available_tickers))
+                        w /= np.sum(w)
+                        all_weights[i,:] = w
+                        ret = np.sum((log_ret.mean() * w) * 252)
+                        vol = np.sqrt(np.dot(w.T, np.dot(log_ret.cov() * 252, w)))
+                        sharpe_arr[i] = ret / vol
 
-                # --- MOBILE-FIRST VERTICAL DISPLAY ---
+                    best_idx = sharpe_arr.argmax() 
+                    opt_weights = all_weights[best_idx,:] 
+                    
+                    opt_cum = (1 + returns_pct.dot(opt_weights)).cumprod()
+                    bench_cum = (1 + bench_data.pct_change().dropna()).cumprod()
+                    
+                    final_ret = float((opt_cum.iloc[-1] - 1) * 100) 
+                    bench_ret = float((bench_cum.iloc[-1] - 1) * 100) 
+                    alpha = final_ret - bench_ret 
+
+                    st.session_state['calculated'] = True
+                    st.session_state['final_ret'] = final_ret
+                    st.session_state['bench_ret'] = bench_ret
+                    st.session_state['alpha'] = alpha
+                    st.session_state['opt_cum'] = opt_cum
+                    st.session_state['bench_cum'] = bench_cum
+                    st.session_state['opt_weights'] = opt_weights
+                    st.session_state['available_labels_final'] = [l for l in selected_labels if current_map[l] in available_tickers]
+
+            # --- RENDER SIMULATION RESULTS ---
+            if 'calculated' in st.session_state and st.session_state['calculated']:
+                st.markdown("---")
                 st.subheader("📊 Performance Summary")
                 m1, m2 = st.columns(2)
-                m1.metric("Portfolio", f"{final_ret:.1f}%")
-                m2.metric(f"{market_name}", f"{bench_ret:.1f}%")
-                st.metric("Alpha (Your Edge)", f"{alpha:.1f}%", delta=f"{alpha:.1f}%")
+                m1.metric("Portfolio", f"{st.session_state['final_ret']:.1f}%")
+                m2.metric(f"{market_name}", f"{st.session_state['bench_ret']:.1f}%")
+                st.metric("Alpha (Your Edge)", f"{st.session_state['alpha']:.1f}%", delta=f"{st.session_state['alpha']:.1f}%")
 
                 st.markdown("---")
 
-                # Line Chart first
+                # Line Chart
                 st.subheader("📉 Market Comparison")
                 fig_line = go.Figure()
-                fig_line.add_trace(go.Scatter(x=opt_cum.index, y=opt_cum, name="Portfolio", line=dict(color='#2ecc71', width=3)))
-                fig_line.add_trace(go.Scatter(x=bench_cum.index, y=bench_cum, name=market_name, line=dict(color='#3498db', width=2, dash='dot')))
+                fig_line.add_trace(go.Scatter(x=st.session_state['opt_cum'].index, y=st.session_state['opt_cum'], name="Portfolio", line=dict(color='#2ecc71', width=3)))
+                fig_line.add_trace(go.Scatter(x=st.session_state['bench_cum'].index, y=st.session_state['bench_cum'], name=market_name, line=dict(color='#3498db', width=2, dash='dot')))
                 fig_line.update_layout(
                     height=400, 
                     margin=dict(l=0, r=0, t=20, b=0), 
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     template="plotly_white"
                 )
-                st.plotly_chart(fig_line, use_container_width=True, config={'displayModeBar': False})
+                st.plotly_chart(fig_line, width='stretch', config={'displayModeBar': False})
 
                 st.markdown("---")
 
-                # Pie Chart second
+                # Pie Chart
                 st.subheader("🍕 Optimal Allocation")
-                available_labels_final = [l for l in selected_labels if current_map[l] in available_tickers]
-                fig_pie = px.pie(values=opt_weights, names=available_labels_final, hole=0.4)
+                fig_pie = px.pie(values=st.session_state['opt_weights'], names=st.session_state['available_labels_final'], hole=0.4)
                 fig_pie.update_layout(height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h"))
-                st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
+                st.plotly_chart(fig_pie, width='stretch', config={'displayModeBar': False})
 
                 st.markdown("---")
-                st.caption("""
-                **Disclaimer & Disclosure** This application is strictly for **educational and research purposes**. It is not a commercial financial 
-                product and does not constitute professional investment advice. 
+                
+                pdf_bytes = create_pdf(market_name, st.session_state['available_labels_final'], st.session_state['opt_weights'], st.session_state['final_ret'], start_date, end_date)
+                st.download_button("📩 Download PDF Report", data=pdf_bytes, file_name="Portfolio_Report.pdf", width='stretch')
 
-                Please be aware:
-                * **Prone to Errors:** The data is pulled from automated sources and may contain inaccuracies or delays.
-                * **No Guarantees:** Historical performance (backtesting) does not guarantee future results. 
-                * **User Responsibility:** Users should consult with a certified financial advisor before making 
-                any investment decisions. The developers of this tool are not responsible for any financial losses.
-                """)
-
-                # PDF Export at the bottom
-                pdf_bytes = create_pdf(market_name, available_labels_final, opt_weights, final_ret, start_date, end_date)
-                st.download_button("📩 Download PDF Report", data=pdf_bytes, file_name="Portfolio_Report.pdf", use_container_width=True)
-
-            else:
-                st.error("Not enough historical data found for these stocks.")
+            # Footer disclosures stay static at the base
+            st.caption("""
+            **Disclaimer & Disclosure** This application is strictly for **educational and research purposes**. It is not a commercial financial 
+            product and does not constitute professional investment advice. 
+            """)
+            
+        else:
+            st.error("Not enough historical data found for these stocks.")
 else:
+    if 'calculated' in st.session_state:
+        st.session_state['calculated'] = False
     st.info("💡 Select 5 to 10 stocks above to begin the calculation.")
