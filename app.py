@@ -8,19 +8,6 @@ from fpdf import FPDF
 from supabase import create_client, Client
 
 
-# Hard-override all potential Streamlit structural footer, header, and menu elements
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden !important;}
-            footer {visibility: hidden !important;}
-            header {visibility: hidden !important;}
-            .st-emotion-cache-18ni7th {visibility: hidden !important;} /* Targets specific viewer wrappers */
-            .stAppFooter {display: none !important;} /* Targets the explicit modern footer class */
-            [data-testid="stHeader"] {display: none !important;} /* Strips the header block */
-            [data-testid="stFooter"] {display: none !important;} /* Strips the modern footer block */
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # --- 1. SUPABASE CONNECTION SETUP ---
 try:
