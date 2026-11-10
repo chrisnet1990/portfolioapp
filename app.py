@@ -7,23 +7,31 @@ from datetime import datetime, timedelta
 from fpdf import FPDF
 from supabase import create_client, Client
 
-# Hide the "Built with Streamlit" footer and main menu hamburger
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+# set_page_config must be the first Streamlit command
+st.set_page_config(page_title="Portfolio Pro", layout="centered")
 
-# --- 1. SUPABASE CONNECTION SETUP ---
+# Hide the "Built with Streamlit" footer and main menu hamburger
+st.markdown(
+    """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# --- 1. SUPABASE CONNECTION (created once, reused across reruns/users) ---
+@st.cache_resource
+def get_client() -> Client:
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
 try:
-    URL = st.secrets["SUPABASE_URL"]
-    KEY = st.secrets["SUPABASE_KEY"]
-    supabase: Client = create_client(URL, KEY)
-except Exception as e:
+    supabase = get_client()
+except Exception:
     st.error("Missing Supabase Secrets! Please ensure SUPABASE_URL and SUPABASE_KEY are in your secrets.")
+    st.stop()  # without this the app would crash later with a confusing NameError
 
 # --- 2. FULL COMPANY DATABASE ---
 NIFTY_50_DATA = {
@@ -71,12 +79,12 @@ SP_500_DATA = {
     "ZTS": "Zoetis", "KLAC": "KLA Corp", "SLB": "Schlumberger", "MCO": "Moody's", "FDX": "FedEx",
     "APH": "Amphenol", "ECL": "Ecolab", "WM": "Waste Management", "ADSK": "Autodesk", "GD": "General Dynamics",
     "ITW": "Illinois Tool Works", "USB": "US Bancorp", "ICE": "Intercontinental Exchange", "CMG": "Chipotle",
-    "PH": "Parker-Hannifin", "MCK": "McKessey", "F": "Ford", "GM": "GM", "DASH": "DoorDash", "EMR": "Emerson Electric",
+    "PH": "Parker-Hannifin", "MCK": "McKesson", "F": "Ford", "GM": "GM", "DASH": "DoorDash", "EMR": "Emerson Electric",
     "NSC": "Norfolk Southern", "PCAR": "PACCAR", "ROST": "Ross Stores", "WELL": "Welltower", "MSI": "Motorola",
     "PSX": "Phillips 66", "MPC": "Marathon Petroleum", "CPRT": "Copart", "DXCM": "Dexcom", "AJG": "Arthur J. Gallagher",
     "HLT": "Hilton", "CSX": "CSX Corp", "IT": "Gartner", "CARR": "Carrier", "CTAS": "Cintas", "AON": "Aon",
     "TGT": "Target", "NOC": "Northrop Grumman", "ANET": "Arista Networks", "D": "Dominion Energy", "TT": "Trane",
-    "ROP": "Roper", "TDG": "TransDigm", "EW": "Edwards Lifesciences", "CUM": "Cummins", "MET": "MetLife",
+    "ROP": "Roper", "TDG": "TransDigm", "EW": "Edwards Lifesciences", "CMI": "Cummins", "MET": "MetLife",
     "WMB": "Williams Cos", "ADM": "Archer-Daniels-Midland", "DELL": "Dell", "O": "Realty Income", "BKR": "Baker Hughes",
     "KMB": "Kimberly-Clark", "OKE": "ONEOK", "DLR": "Digital Realty", "COR": "Cencora", "A": "Agilent",
     "GWW": "Grainger", "PAYX": "Paychex", "TEL": "TE Connectivity", "JCI": "Johnson Controls", "IDXX": "IDEXX Labs",
@@ -110,8 +118,8 @@ SP_500_DATA = {
     "SJM": "JM Smucker", "ALB": "Albemarle", "PNW": "Pinnacle West", "FRT": "Federal Realty", "XRAY": "Dentsply Sirona",
     "EMN": "Eastman Chemical", "IP": "International Paper", "SWKS": "Skyworks", "WHR": "Whirlpool",
     "TECH": "Bio-Techne", "BIO": "Bio-Rad", "UHS": "Universal Health", "HSIC": "Henry Schein", "CRL": "Charles River",
-    "DXC": "DXC Tech", "TFX": "Teleflex", "MTD": "Mettler Toledo", "Zebra": "Zebra Tech", "HII": "Huntington Ingalls",
-    "LNT": "Alliant Energy", "NI": "NiSource", "ATO": "Atmos Energy", "NRG": "NRG Energy", "VST": "Vraw Corp",
+    "DXC": "DXC Tech", "TFX": "Teleflex", "MTD": "Mettler Toledo", "ZBRA": "Zebra Tech", "HII": "Huntington Ingalls",
+    "LNT": "Alliant Energy", "NI": "NiSource", "ATO": "Atmos Energy", "NRG": "NRG Energy", "VST": "Vistra",
     "SRE": "Sempra", "WEC": "WEC Energy", "ES": "Eversource", "DTE": "DTE Energy", "ETR": "Entergy",
     "FE": "FirstEnergy", "AEE": "Ameren", "CMS": "CMS Energy", "EVRG": "Evergy", "AVB": "AvalonBay",
     "EQR": "Equity Residential", "PSA": "Public Storage", "BXP": "Boston Properties", "KIM": "Kimco Realty",
@@ -122,70 +130,121 @@ NIFTY_MAP = {f"{k} ({v})": k for k, v in NIFTY_50_DATA.items()}
 SP_MAP = {f"{k} ({v})": k for k, v in SP_500_DATA.items()}
 
 # --- 3. DATA ENGINE ---
-@st.cache_data
-def get_supabase_data(tickers, start, end):
-    try:
-        response = supabase.table("stock_history") \
-            .select("date, ticker, price") \
-            .in_("ticker", tickers) \
-            .gte("date", start.strftime('%Y-%m-%d')) \
-            .lte("date", end.strftime('%Y-%m-%d')) \
-            .order("date") \
-            .limit(30000) \
-            .execute()
-        
-        full_df = pd.DataFrame(response.data)
-        if full_df.empty:
-            return pd.DataFrame()
+PAGE_SIZE = 1000          # Supabase returns at most ~1000 rows per request by default
+N_PORTFOLIOS = 20_000     # vectorised, so far more paths than before at a fraction of the time
 
-        full_df['date'] = pd.to_datetime(full_df['date'])
-        filtered_df = full_df.drop_duplicates(subset=['date', 'ticker'], keep='last')
-        pivoted_df = filtered_df.pivot(index='date', columns='ticker', values='price')
-        return pivoted_df.ffill().bfill()
+
+@st.cache_data(ttl=3600, show_spinner="Loading prices...")
+def _fetch_prices(tickers: tuple, start: str, end: str) -> pd.DataFrame:
+    """Download price rows page by page, then pivot to date x ticker.
+    Exceptions are NOT caught here so a temporary failure is never cached."""
+    rows, offset = [], 0
+    while True:
+        resp = (
+            supabase.table("stock_history")
+            .select("date, ticker, price")
+            .in_("ticker", list(tickers))
+            .gte("date", start)
+            .lte("date", end)
+            .order("date")
+            .order("ticker")
+            .range(offset, offset + PAGE_SIZE - 1)
+            .execute()
+        )
+        rows.extend(resp.data)
+        if len(resp.data) < PAGE_SIZE:
+            break
+        offset += PAGE_SIZE
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.drop_duplicates(subset=["date", "ticker"], keep="last")
+    return df.pivot(index="date", columns="ticker", values="price").ffill().bfill()
+
+
+def get_supabase_data(tickers, start, end) -> pd.DataFrame:
+    try:
+        return _fetch_prices(tuple(sorted(tickers)), start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
     except Exception as e:
         st.error(f"❌ Connection Error: {e}")
         return pd.DataFrame()
 
+
+# --- 3b. MONTE CARLO (fully vectorised) ---
+def best_sharpe_weights(log_ret: pd.DataFrame, n: int = N_PORTFOLIOS) -> np.ndarray:
+    mu = log_ret.mean().values * 252            # computed ONCE, not 2,000 times
+    cov = log_ret.cov().values * 252
+    w = np.random.default_rng().dirichlet(np.ones(len(mu)), n)   # n random portfolios, rows sum to 1
+    rets = w @ mu
+    vols = np.sqrt(np.einsum("ij,jk,ik->i", w, cov, w))
+    return w[(rets / vols).argmax()]
+
+
+def growth_vs_benchmark(prices: pd.DataFrame, tickers, weights, benchmark):
+    """Cumulative growth of the weighted portfolio and of the benchmark."""
+    if benchmark not in prices.columns:
+        return None
+    tickers = [t for t in tickers if t in prices.columns]
+    if len(tickers) < 2:
+        return None
+    stocks = prices[tickers].dropna()
+    if len(stocks) < 2:
+        return None
+    port = (1 + stocks.pct_change().dropna().dot(weights)).cumprod()
+    bench = (1 + prices[benchmark].dropna().pct_change().dropna()).cumprod()
+    return port, bench
+
+
+def growth_chart(port, bench, bench_name, height, port_style, bench_style, port_name="Portfolio"):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=port.index, y=port, name=port_name, line=port_style))
+    fig.add_trace(go.Scatter(x=bench.index, y=bench, name=bench_name, line=bench_style))
+    fig.update_layout(
+        height=height,
+        margin=dict(l=0, r=0, t=20, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        template="plotly_white",
+    )
+    return fig
+
+
 # --- 4. PDF ENGINE ---
 def create_pdf(market, stocks, weights, final_ret, start, end):
-    pdf = FPDF() 
-    pdf.add_page() 
-    pdf.set_font("Arial", 'B', 16) 
-    pdf.cell(0, 10, f'{market} Analysis Report'.encode('latin-1', 'replace').decode('latin-1'), 0, 1, 'C') 
-    pdf.ln(10) 
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, f'{market} Analysis Report'.encode('latin-1', 'replace').decode('latin-1'), 0, 1, 'C')
+    pdf.ln(10)
     pdf.set_font("Arial", size=11)
-    pdf.cell(0, 10, f"Analysis Range: {start} to {end}", ln=True) 
+    pdf.cell(0, 10, f"Analysis Range: {start} to {end}", ln=True)
     pdf.ln(5)
     for s, w in zip(stocks, weights):
         clean_s = s.encode('latin-1', 'replace').decode('latin-1')
-        pdf.cell(0, 8, f"- {clean_s}: {w*100:.2f}%", ln=True) 
-    pdf.ln(10) 
+        pdf.cell(0, 8, f"- {clean_s}: {w*100:.2f}%", ln=True)
+    pdf.ln(10)
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, f"Portfolio Growth: {final_ret:.2f}%", ln=True) 
-    return pdf.output(dest='S').encode('latin-1')
+    pdf.cell(0, 10, f"Portfolio Growth: {final_ret:.2f}%", ln=True)
+    out = pdf.output(dest='S')
+    return out.encode('latin-1') if isinstance(out, str) else bytes(out)   # works with fpdf and fpdf2
 
-# --- 5. PAGE SETUP ---
-st.set_page_config(page_title="Portfolio Pro", layout="centered")
 
-# --- 6. INPUTS (VERTICAL LAYOUT) ---
+# --- 6. INPUTS ---
 st.title("📂 Portfolio Pro")
 st.markdown("---")
 
 market_choice = st.selectbox("Select Market", ["Nifty 50 (India)", "S&P 500 (USA)"])
 
 if "Nifty" in market_choice:
-    current_map = NIFTY_MAP
-    market_name = "Nifty 50"
-    benchmark_ticker = "^NSEI"
+    current_map, market_name, benchmark_ticker = NIFTY_MAP, "Nifty 50", "^NSEI"
 else:
-    current_map = SP_MAP
-    market_name = "S&P 500"
-    benchmark_ticker = "^GSPC"
+    current_map, market_name, benchmark_ticker = SP_MAP, "S&P 500", "^GSPC"
 
 selected_labels = st.multiselect(
-    "Select 5-10 Stocks", 
+    "Select 5-10 Stocks",
     options=list(current_map.keys()),
-    placeholder="Search tickers..."
+    placeholder="Search tickers...",
 )
 selected_tickers = [current_map[label] for label in selected_labels]
 
@@ -197,199 +256,145 @@ with col_date2:
 
 st.markdown("---")
 
-# --- 7. ANALYSIS & DISPLAY CONTROL ---
-if 5 <= len(selected_tickers) <= 10:
-    
-    # Core Step 1: Always load background data if tickers match criteria
-    all_required = selected_tickers + [benchmark_ticker]
-    data_combined = get_supabase_data(all_required, start_date, end_date)
-
-    if not data_combined.empty and benchmark_ticker in data_combined.columns:
-        available_tickers = [t for t in selected_tickers if t in data_combined.columns]
-        
-        if len(available_tickers) >= 2:
-            data = data_combined[available_tickers].dropna()
-            bench_data = data_combined[benchmark_ticker].dropna()
-            
-            # Calculate returns matrices
-            returns_pct = data.pct_change().dropna()
-            log_ret = np.log(data/data.shift(1)).dropna()
-            
-            # --- CORRELATION & VARIANCE INTERFACE (Pre-Run) ---
-            st.subheader("🧮 Asset Risk Metrics Matrix")
-            
-            # Calculate Variance (Annualized: Daily Variance * 252 days)
-            variance_series = log_ret.var() * 252
-            
-            # Display localized statistical variance details
-            st.markdown("**Annualized Asset Variance Summary:**")
-            var_cols = st.columns(len(available_tickers))
-            for idx, ticker in enumerate(available_tickers):
-                with var_cols[idx]:
-                    st.metric(
-                        label=ticker.replace(".NS", ""), 
-                        value=f"{variance_series[ticker]:.4f}"
-                    )
-            
-            # Calculate Correlation Matrix
-            corr_matrix = returns_pct.corr()
-            
-            # Generate Interactive Plotly Heatmap Matrix
-            fig_corr = px.imshow(
-                corr_matrix,
-                text_auto=".2f",
-                aspect="auto",
-                color_continuous_scale="RdBu_r",
-                range_color=[-1, 1],
-                labels=dict(color="Correlation")
-            )
-            fig_corr.update_layout(
-                height=400,
-                margin=dict(l=20, r=20, t=20, b=20),
-                xaxis_title="Tickers",
-                yaxis_title="Tickers"
-            )
-            st.plotly_chart(fig_corr, width="stretch", config={'displayModeBar': False})
-            
-            st.markdown("---")
-            
-            # --- THE SIMULATION ACTION BUTTON ---
-            st.subheader("🚀 Run Allocation Engine")
-            st.markdown("Click below to pass these correlation and variance parameters through the Monte Carlo pipeline.")
-            
-            if st.button("Run Portfolio Simulation", type="primary", width="stretch"):
-                # Trigger internal state calculation block
-                with st.spinner('⏳ Running 2,000 Monte Carlo Paths...'):
-                    num_portfolios = 2000
-                    all_weights = np.zeros((num_portfolios, len(available_tickers)))
-                    sharpe_arr = np.zeros(num_portfolios)
-
-                    for i in range(num_portfolios):
-                        w = np.random.random(len(available_tickers))
-                        w /= np.sum(w)
-                        all_weights[i,:] = w
-                        ret = np.sum((log_ret.mean() * w) * 252)
-                        vol = np.sqrt(np.dot(w.T, np.dot(log_ret.cov() * 252, w)))
-                        sharpe_arr[i] = ret / vol
-
-                    best_idx = sharpe_arr.argmax() 
-                    opt_weights = all_weights[best_idx,:] 
-                    
-                    opt_cum = (1 + returns_pct.dot(opt_weights)).cumprod()
-                    bench_cum = (1 + bench_data.pct_change().dropna()).cumprod()
-                    
-                    final_ret = float((opt_cum.iloc[-1] - 1) * 100) 
-                    bench_ret = float((bench_cum.iloc[-1] - 1) * 100) 
-                    alpha = final_ret - bench_ret 
-
-                    # Save properties to layout session so views persist
-                    st.session_state['calculated'] = True
-                    st.session_state['final_ret'] = final_ret
-                    st.session_state['bench_ret'] = bench_ret
-                    st.session_state['alpha'] = alpha
-                    st.session_state['opt_cum'] = opt_cum
-                    st.session_state['bench_cum'] = bench_cum
-                    st.session_state['opt_weights'] = opt_weights
-                    st.session_state['available_labels_final'] = [l for l in selected_labels if current_map[l] in available_tickers]
-                    st.session_state['available_tickers'] = available_tickers
-                    st.session_state['all_required'] = all_required
-
-            # --- RENDER RESULTS IF RUN BUTTON IS PRESSED ---
-            if 'calculated' in st.session_state and st.session_state['calculated']:
-                st.markdown("---")
-                st.subheader("📊 Performance Summary (Selected Period)")
-                m1, m2 = st.columns(2)
-                m1.metric("Portfolio", f"{st.session_state['final_ret']:.1f}%")
-                m2.metric(f"{market_name}", f"{st.session_state['bench_ret']:.1f}%")
-                st.metric("Alpha (Your Edge)", f"{st.session_state['alpha']:.1f}%", delta=f"{st.session_state['alpha']:.1f}%")
-
-                st.markdown("---")
-
-                # Line Chart
-                st.subheader("📉 Market Comparison")
-                fig_line = go.Figure()
-                fig_line.add_trace(go.Scatter(x=st.session_state['opt_cum'].index, y=st.session_state['opt_cum'], name="Portfolio", line=dict(color='#2ecc71', width=3)))
-                fig_line.add_trace(go.Scatter(x=st.session_state['bench_cum'].index, y=st.session_state['bench_cum'], name=market_name, line=dict(color='#3498db', width=2, dash='dot')))
-                fig_line.update_layout(
-                    height=400, 
-                    margin=dict(l=0, r=0, t=20, b=0), 
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    template="plotly_white"
-                )
-                st.plotly_chart(fig_line, width="stretch", config={'displayModeBar': False})
-
-                st.markdown("---")
-
-                # Pie Chart
-                st.subheader("🍕 Optimal Allocation")
-                fig_pie = px.pie(values=st.session_state['opt_weights'], names=st.session_state['available_labels_final'], hole=0.4)
-                fig_pie.update_layout(height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h"))
-                st.plotly_chart(fig_pie, width="stretch", config={'displayModeBar': False})
-
-                # --- 8. POST-ANALYSIS DASHBOARD (End Date to Today) ---
-                today_date = datetime.today().date()
-                if (today_date - end_date).days >= 30:
-                    st.markdown("---")
-                    st.subheader("📈 Out-of-Sample Performance (End Date to Today)")
-                    st.caption(f"Tracking performance from **{end_date}** to **{today_date}** based on optimized allocations.")
-
-                    post_data_combined = get_supabase_data(st.session_state['all_required'], end_date, today_date)
-                    
-                    if not post_data_combined.empty and benchmark_ticker in post_data_combined.columns:
-                        post_avail_tickers = [t for t in st.session_state['available_tickers'] if t in post_data_combined.columns]
-                        
-                        if len(post_avail_tickers) >= 2:
-                            post_data = post_data_combined[post_avail_tickers].dropna()
-                            post_bench = post_data_combined[benchmark_ticker].dropna()
-
-                            if len(post_data) > 1:
-                                post_returns = post_data.pct_change().dropna()
-                                post_bench_returns = post_bench.pct_change().dropna()
-
-                                opt_w = st.session_state['opt_weights']
-                                post_opt_cum = (1 + post_returns.dot(opt_w)).cumprod()
-                                post_bench_cum = (1 + post_bench_returns).cumprod()
-
-                                post_final_ret = float((post_opt_cum.iloc[-1] - 1) * 100)
-                                post_bench_ret = float((post_bench_cum.iloc[-1] - 1) * 100)
-                                post_alpha = post_final_ret - post_bench_ret
-
-                                pm1, pm2, pm3 = st.columns(3)
-                                pm1.metric("Post-Portfolio Return", f"{post_final_ret:.1f}%")
-                                pm2.metric(f"Post-{market_name} Return", f"{post_bench_ret:.1f}%")
-                                pm3.metric("Post-Alpha", f"{post_alpha:.1f}%", delta=f"{post_alpha:.1f}%")
-
-                                fig_post = go.Figure()
-                                fig_post.add_trace(go.Scatter(x=post_opt_cum.index, y=post_opt_cum, name="Portfolio (Post-Analysis)", line=dict(color='#e74c3c', width=3)))
-                                fig_post.add_trace(go.Scatter(x=post_bench_cum.index, y=post_bench_cum, name=f"{market_name} (Post-Analysis)", line=dict(color='#34495e', width=2, dash='dot')))
-                                fig_post.update_layout(
-                                    height=350,
-                                    margin=dict(l=0, r=0, t=20, b=0),
-                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                                    template="plotly_white"
-                                )
-                                st.plotly_chart(fig_post, width="stretch", config={'displayModeBar': False})
-                            else:
-                                st.warning("Insufficient data points recorded between the end date and today.")
-                    else:
-                        st.info("No recent market data available in database for this period.")
-
-                st.markdown("---")
-                
-                # PDF Export Button placement
-                pdf_bytes = create_pdf(market_name, st.session_state['available_labels_final'], st.session_state['opt_weights'], st.session_state['final_ret'], start_date, end_date)
-                st.download_button("📩 Download PDF Report", data=pdf_bytes, file_name="Portfolio_Report.pdf", width="stretch")
-
-            # Footer disclosures stay static at the very base
-            st.caption("""
-            **Disclaimer & Disclosure** This application is strictly for **educational and research purposes**. It is not a commercial financial 
-            product and does not constitute professional investment advice. 
-            """)
-            
-        else:
-            st.error("Not enough historical data found for these stocks.")
-else:
-    # Clear old execution path if user adjusts selection parameters to less than 5 tickers
-    if 'calculated' in st.session_state:
-        st.session_state['calculated'] = False
+# --- 7. ANALYSIS & DISPLAY ---
+if not (5 <= len(selected_tickers) <= 10):
+    st.session_state.pop("results", None)
     st.info("💡 Select 5 to 10 stocks above to begin the calculation.")
+    st.stop()
+
+if start_date >= end_date:
+    st.error("Start Date must be before End Date.")
+    st.stop()
+
+all_required = selected_tickers + [benchmark_ticker]
+data_combined = get_supabase_data(all_required, start_date, end_date)
+
+if data_combined.empty or benchmark_ticker not in data_combined.columns:
+    st.error("Not enough historical data found for these stocks.")
+    st.stop()
+
+available_tickers = [t for t in selected_tickers if t in data_combined.columns]
+if len(available_tickers) < 2:
+    st.error("Not enough historical data found for these stocks.")
+    st.stop()
+
+missing = [t for t in selected_tickers if t not in available_tickers]
+if missing:
+    st.warning(f"No price data found for: {', '.join(missing)}. They were skipped.")
+
+data = data_combined[available_tickers].dropna()
+returns_pct = data.pct_change().dropna()
+log_ret = np.log(data / data.shift(1)).dropna()
+
+# --- Risk metrics ---
+st.subheader("🧮 Asset Risk Metrics Matrix")
+variance_series = log_ret.var() * 252
+st.markdown("**Annualized Asset Variance Summary:**")
+var_cols = st.columns(len(available_tickers))
+for col, ticker in zip(var_cols, available_tickers):
+    col.metric(label=ticker.replace(".NS", ""), value=f"{variance_series[ticker]:.4f}")
+
+fig_corr = px.imshow(
+    returns_pct.corr(),
+    text_auto=".2f",
+    aspect="auto",
+    color_continuous_scale="RdBu_r",
+    range_color=[-1, 1],
+    labels=dict(color="Correlation"),
+)
+fig_corr.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), xaxis_title="Tickers", yaxis_title="Tickers")
+st.plotly_chart(fig_corr, width="stretch", config={'displayModeBar': False})
+
+st.markdown("---")
+
+# --- Simulation ---
+st.subheader("🚀 Run Allocation Engine")
+st.markdown("Click below to pass these correlation and variance parameters through the Monte Carlo pipeline.")
+
+# Identifies the current inputs, so old results are never shown against new selections
+signature = (market_name, tuple(available_tickers), start_date, end_date)
+
+if st.button("Run Portfolio Simulation", type="primary", width="stretch"):
+    with st.spinner(f"⏳ Running {N_PORTFOLIOS:,} Monte Carlo paths..."):
+        opt_weights = best_sharpe_weights(log_ret)
+        port = growth_vs_benchmark(data_combined, available_tickers, opt_weights, benchmark_ticker)
+        port_cum, bench_cum = port
+        final_ret = float((port_cum.iloc[-1] - 1) * 100)
+        bench_ret = float((bench_cum.iloc[-1] - 1) * 100)
+        st.session_state["results"] = dict(
+            signature=signature,
+            weights=opt_weights,
+            labels=[l for l in selected_labels if current_map[l] in available_tickers],
+            port_cum=port_cum,
+            bench_cum=bench_cum,
+            final_ret=final_ret,
+            bench_ret=bench_ret,
+        )
+
+res = st.session_state.get("results")
+if res and res["signature"] == signature:
+    alpha = res["final_ret"] - res["bench_ret"]
+
+    st.markdown("---")
+    st.subheader("📊 Performance Summary (Selected Period)")
+    m1, m2 = st.columns(2)
+    m1.metric("Portfolio", f"{res['final_ret']:.1f}%")
+    m2.metric(market_name, f"{res['bench_ret']:.1f}%")
+    st.metric("Alpha (Your Edge)", f"{alpha:.1f}%", delta=f"{alpha:.1f}%")
+
+    st.markdown("---")
+    st.subheader("📉 Market Comparison")
+    st.plotly_chart(
+        growth_chart(res["port_cum"], res["bench_cum"], market_name, 400,
+                     dict(color="#2ecc71", width=3), dict(color="#3498db", width=2, dash="dot")),
+        width="stretch", config={'displayModeBar': False},
+    )
+
+    st.markdown("---")
+    st.subheader("🍕 Optimal Allocation")
+    fig_pie = px.pie(values=res["weights"], names=res["labels"], hole=0.4)
+    fig_pie.update_layout(height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h"))
+    st.plotly_chart(fig_pie, width="stretch", config={'displayModeBar': False})
+
+    # --- 8. Out-of-sample: end date -> today ---
+    today_date = datetime.today().date()
+    if (today_date - end_date).days >= 30:
+        st.markdown("---")
+        st.subheader("📈 Out-of-Sample Performance (End Date to Today)")
+        st.caption(f"Tracking performance from **{end_date}** to **{today_date}** based on optimized allocations.")
+
+        post_data = get_supabase_data(all_required, end_date, today_date)
+        post = growth_vs_benchmark(post_data, available_tickers, res["weights"], benchmark_ticker) if not post_data.empty else None
+
+        if post is None:
+            st.info("No recent market data available in database for this period.")
+        else:
+            post_cum, post_bench_cum = post
+            post_ret = float((post_cum.iloc[-1] - 1) * 100)
+            post_bench_ret = float((post_bench_cum.iloc[-1] - 1) * 100)
+            post_alpha = post_ret - post_bench_ret
+
+            pm1, pm2, pm3 = st.columns(3)
+            pm1.metric("Post-Portfolio Return", f"{post_ret:.1f}%")
+            pm2.metric(f"Post-{market_name} Return", f"{post_bench_ret:.1f}%")
+            pm3.metric("Post-Alpha", f"{post_alpha:.1f}%", delta=f"{post_alpha:.1f}%")
+
+            st.plotly_chart(
+                growth_chart(post_cum, post_bench_cum, f"{market_name} (Post-Analysis)", 350,
+                             dict(color="#e74c3c", width=3), dict(color="#34495e", width=2, dash="dot"),
+                             port_name="Portfolio (Post-Analysis)"),
+                width="stretch", config={'displayModeBar': False},
+            )
+
+    st.markdown("---")
+    st.download_button(
+        "📩 Download PDF Report",
+        data=create_pdf(market_name, res["labels"], res["weights"], res["final_ret"], start_date, end_date),
+        file_name="Portfolio_Report.pdf",
+        width="stretch",
+    )
+
+st.caption(
+    "**Disclaimer & Disclosure** This application is strictly for **educational and research purposes**. "
+    "It is not a commercial financial product and does not constitute professional investment advice."
+)
